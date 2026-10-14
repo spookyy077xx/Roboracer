@@ -2,31 +2,44 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 
-// ===== L298N: ESP8266 GPIO NUMBERS =====
-#define ENA 13  // GPIO13 / D7
-#define IN1 5   // GPIO5  / D1
-#define IN2 4   // GPIO4  / D2
+// ==================================================
+// ROBO RACER - ESP8266 NODEMCU / ESP-12E + L298N
+// ==================================================
+// ENA -> D7 (GPIO13)
+// IN1 -> D1 (GPIO5)
+// IN2 -> D2 (GPIO4)
+// ENB -> D8 (GPIO15) - remove ENB jumper
+// IN3 -> D5 (GPIO14)
+// IN4 -> D6 (GPIO12)
+//
+// L298N GND and ESP8266 GND must be connected.
+// Use a suitable external supply for the motors.
 
-#define ENB 16  // GPIO16 / D0
-#define IN3 14  // GPIO14 / D5
-#define IN4 12  // GPIO12 / D6
+// ---------------- MOTOR PINS -----------------------
+#define ENA 13
+#define IN1 5
+#define IN2 4
 
-// ===== WIFI ACCESS POINT =====
+#define ENB 15
+#define IN3 14
+#define IN4 12
+
+// ---------------- WIFI ACCESS POINT ----------------
 const char* ssid = "OLL_RoboRacer";
 const char* password = "robostudios@121321##@@";
 
 ESP8266WebServer server(80);
 
-// ===== MOTOR SETTINGS =====
+// ---------------- MOTOR STATE ----------------------
 int motorSpeed = 170;
 char currentCommand = 'S';
+
+bool moving = false;
 
 unsigned long lastCommandTime = 0;
 const unsigned long TIMEOUT_MS = 1200;
 
-bool moving = false;
-
-// ===== STOP MOTORS =====
+// ---------------- STOP MOTORS ----------------------
 void stopMotors() {
   analogWrite(ENA, 0);
   analogWrite(ENB, 0);
@@ -39,12 +52,12 @@ void stopMotors() {
   moving = false;
 }
 
-// ===== SET MOTOR DIRECTIONS AND SPEED =====
+// ---------------- SET MOTOR SPEED/DIRECTION --------
 void setMotors(int left, int right) {
   left = constrain(left, -255, 255);
   right = constrain(right, -255, 255);
 
-  // Remove PWM before changing direction.
+  // Disable PWM before changing direction.
   analogWrite(ENA, 0);
   analogWrite(ENB, 0);
 
@@ -60,14 +73,14 @@ void setMotors(int left, int right) {
   moving = (left != 0 || right != 0);
 }
 
-// ===== APPLY SELECTED COMMAND =====
+// ---------------- APPLY COMMAND --------------------
 void applyCommand() {
-  int s = motorSpeed;
-
-  if (s == 0 || currentCommand == 'S') {
+  if (motorSpeed == 0 || currentCommand == 'S') {
     stopMotors();
     return;
   }
+
+  int s = constrain(motorSpeed, 0, 255);
 
   switch (currentCommand) {
     case 'F':
@@ -93,7 +106,7 @@ void applyCommand() {
   }
 }
 
-// ===== DIRECTION ENDPOINT =====
+// ---------------- COMMAND HANDLER ------------------
 void handleCommand() {
   if (!server.hasArg("c")) {
     server.send(400, "text/plain", "Missing command");
@@ -115,8 +128,8 @@ void handleCommand() {
     return;
   }
 
-  lastCommandTime = millis();
   currentCommand = c;
+  lastCommandTime = millis();
 
   if (c == 'S') {
     stopMotors();
@@ -127,7 +140,7 @@ void handleCommand() {
   server.send(200, "text/plain", "OK");
 }
 
-// ===== SPEED ENDPOINT =====
+// ---------------- SPEED HANDLER --------------------
 void handleSpeed() {
   if (!server.hasArg("v")) {
     server.send(400, "text/plain", "Missing speed");
@@ -152,456 +165,620 @@ void handleSpeed() {
   int newSpeed = value.toInt();
 
   if (newSpeed < 0 || newSpeed > 255) {
-    server.send(400, "text/plain",
-                "Speed must be 0-255");
+    server.send(400, "text/plain", "Speed must be 0-255");
     return;
   }
 
   motorSpeed = newSpeed;
 
-  // Do not refresh the movement safety timer here.
-  // Only direction commands/heartbeats refresh it.
+  // Apply speed immediately to the current direction.
+  // This does not extend the movement timeout.
   applyCommand();
 
   server.send(200, "text/plain", "Speed updated");
 }
 
-// ===== WEBPAGE =====
+// ---------------- WEBPAGE --------------------------
 const char webpage[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport"
- content="width=device-width, initial-scale=1,
- maximum-scale=1, user-scalable=no">
-<title>RoboRacer</title>
+ content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0e15">
+<title>RoboRacer Controller</title>
 
 <style>
-* {
-  box-sizing: border-box;
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
-}
-
 :root {
-  --bg: #101116;
-  --panel: #1b1c24;
-  --blue: #287cff;
-  --red: #e53b49;
-  --text: #f6f6fb;
-  --muted: #a7a8b9;
+  --bg:#0b0e15;
+  --panel:#111722;
+  --border:#202b3d;
+  --blue:#1678ff;
+  --blue-light:#75b4ff;
+  --text:#f5f7ff;
+  --muted:#9baac1;
+  --red:#f21c3b;
 }
 
-html, body {
-  margin: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: var(--bg);
-  color: var(--text);
-  font-family: Arial, sans-serif;
-  touch-action: manipulation;
+* {
+  box-sizing:border-box;
+  -webkit-tap-highlight-color:transparent;
+  user-select:none;
 }
+
+html,body {
+  margin:0;
+  min-height:100%;
+  background:var(--bg);
+}
+
+body {
+  min-height:100vh;
+  min-height:100dvh;
+  background:radial-gradient(ellipse at 50% 0%,#172131,transparent 65%),var(--bg);
+  color:var(--text);
+  font-family:Arial,Helvetica,sans-serif;
+}
+
+button,input {font:inherit}
+button {cursor:pointer}
 
 .app {
-  width: 100%;
-  height: 100%;
-  padding: 8px 14px;
-  display: flex;
-  flex-direction: column;
+  width:100%;
+  max-width:1500px;
+  min-height:100vh;
+  min-height:100dvh;
+  margin:auto;
+  padding:clamp(10px,3vw,38px);
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
 
-header {
-  min-height: 38px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.controller {
+  width:100%;
+  overflow:hidden;
+  border:1px solid var(--border);
+  border-radius:28px;
+  background:linear-gradient(145deg,#151c28,#0e131d);
+  box-shadow:0 24px 80px #0006,inset 0 1px 0 #ffffff08;
 }
 
-h1 {
-  margin: 0;
-  font-size: clamp(17px, 3vh, 24px);
+.topbar {
+  min-height:100px;
+  padding:20px 28px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:clamp(12px,3vw,38px);
+  flex-wrap:wrap;
 }
 
-.status {
-  color: #76e5a8;
-  font-size: 12px;
+.brand {
+  display:flex;
+  align-items:center;
+  gap:12px;
 }
 
-main {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 1.1fr 0.9fr;
-  gap: 12px;
+.car-icon {
+  font-size:33px;
+  filter:drop-shadow(0 0 10px #1678ff55);
 }
 
-.panel {
-  min-height: 0;
-  min-width: 0;
-  background: var(--panel);
-  border: 1px solid #2b2c39;
-  border-radius: 18px;
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-evenly;
+.brand h1 {
+  margin:0;
+  font-size:clamp(23px,3.3vw,39px);
+  font-weight:900;
+  letter-spacing:-1.4px;
 }
 
-.label {
-  font-size: clamp(11px, 2vh, 15px);
-  color: var(--muted);
-  font-weight: bold;
-  letter-spacing: 1px;
+.brand h1 span {color:var(--blue)}
+
+.connection {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  color:var(--muted);
+  font-size:13px;
+  font-weight:800;
+  letter-spacing:.7px;
 }
 
-.dpad {
-  --pad-size: min(48vh, 40vw, 300px);
-  position: relative;
-  width: var(--pad-size);
-  height: var(--pad-size);
-  flex-shrink: 1;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background: #e8e8f0;
-  box-shadow: inset 0 2px 5px #fff,
-              0 4px 0 #aaaab8;
-  overflow: hidden;
-  touch-action: none;
+.connection-dot {
+  width:12px;
+  height:12px;
+  flex-shrink:0;
+  border-radius:50%;
+  background:#8792a5;
 }
 
-.dpad button {
-  position: absolute;
-  padding: 0;
-  border: 0;
-  color: #8588ad;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: clamp(22px, 5vh, 39px);
-  font-weight: bold;
-  touch-action: none;
+.connection.online .connection-dot {
+  background:var(--blue);
+  box-shadow:0 0 15px #1678ff99;
 }
 
-.dpad button.active {
-  background: #c9cadd;
-  color: #454b7d;
+.connection.error .connection-dot {
+  background:var(--red);
+  box-shadow:0 0 12px #f21c3b88;
 }
 
-.arrow-up {
-  left: 29%;
-  top: 0;
-  width: 42%;
-  height: 36%;
-  clip-path: polygon(0 0,100% 0,100% 100%,
-    72% 100%,50% 70%,28% 100%,0 100%);
+.controls {
+  padding:clamp(22px,5vw,58px) clamp(18px,6vw,100px);
+  display:grid;
+  grid-template-columns:1fr 1.8fr;
+  align-items:center;
+  justify-items:center;
+  gap:clamp(16px,5vw,65px);
 }
 
-.arrow-down {
-  left: 29%;
-  bottom: 0;
-  width: 42%;
-  height: 36%;
-  clip-path: polygon(0 0,28% 0,50% 30%,
-    72% 0,100% 0,100% 100%,0 100%);
+.vertical-arrows {
+  width:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:clamp(14px,3vw,28px);
 }
 
-.arrow-left {
-  left: 0;
-  top: 29%;
-  width: 36%;
-  height: 42%;
-  clip-path: polygon(0 0,100% 0,100% 28%,
-    70% 50%,100% 72%,100% 100%,0 100%);
+.horizontal-arrows {
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:clamp(14px,4vw,50px);
 }
 
-.arrow-right {
-  right: 0;
-  top: 29%;
-  width: 36%;
-  height: 42%;
-  clip-path: polygon(0 0,100% 0,100% 100%,
-    0 100%,0 72%,30% 50%,0 28%);
+.arrow {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:0;
+  color:#e9efff;
+  background:linear-gradient(145deg,#202c40,#121a28);
+  border:2px solid #070b12;
+  border-radius:14px;
+  box-shadow:0 5px 0 #070b12,inset 0 1px 0 #ffffff12;
+  touch-action:none;
+  transition:background .08s,color .08s,transform .08s,box-shadow .08s;
 }
 
-.center-stop {
-  z-index: 5;
-  left: 31%;
-  top: 31%;
-  width: 38%;
-  height: 38%;
-  border-radius: 50%;
-  border: 5px solid #4a4b5e !important;
-  background: radial-gradient(circle at 35% 28%,
-    #999ab9,#686a8c 72%) !important;
-  box-shadow: 0 0 0 4px #c5c6d5,
-              inset 0 3px 6px #ffffff55;
+.arrow-up,.arrow-down {
+  width:clamp(86px,17vw,150px);
+  height:clamp(86px,17vw,150px);
+  font-size:clamp(54px,10vw,100px);
+  line-height:1;
 }
 
-.center-stop:active {
-  background: #d83b48 !important;
+.arrow-left,.arrow-right {
+  width:clamp(105px,22vw,220px);
+  height:clamp(78px,14vw,135px);
+  font-size:clamp(57px,10vw,98px);
+  line-height:1;
 }
 
-.hint {
-  color: var(--muted);
-  font-size: 11px;
-  text-align: center;
-  line-height: 1.4;
+.arrow:active,.arrow.active {
+  color:white;
+  background:linear-gradient(145deg,#56a1ff,#1269f2);
+  border-color:var(--blue);
+  box-shadow:0 0 0 3px #1678ff25,0 0 30px #1678ff4a;
+  transform:translateY(3px);
 }
 
-.turn-row {
-  display: flex;
-  width: 100%;
-  gap: 9px;
-}
-
-.turn {
-  flex: 1;
-  min-width: 0;
-  min-height: 58px;
-  border: 1px solid #418cff;
-  border-radius: 14px;
-  background: #174e98;
-  color: white;
-  font-size: clamp(13px, 2.3vh, 18px);
-  font-weight: bold;
-  touch-action: none;
-}
-
-.turn.active {
-  background: var(--blue);
+.bottom-bar {
+  border-top:1px solid var(--border);
+  padding:25px clamp(16px,5vw,65px);
+  display:grid;
+  grid-template-columns:minmax(140px,.8fr) 1px minmax(220px,1.2fr);
+  align-items:center;
+  gap:clamp(18px,4vw,45px);
 }
 
 .stop-button {
-  width: 100%;
-  max-width: 280px;
-  min-height: 48px;
-  border: 0;
-  border-radius: 13px;
-  background: var(--red);
-  color: white;
-  font-size: 17px;
-  font-weight: 900;
-  touch-action: manipulation;
+  min-height:76px;
+  width:100%;
+  max-width:270px;
+  justify-self:center;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:13px;
+  padding:15px;
+  border:0;
+  border-radius:50px;
+  background:linear-gradient(120deg,#ff2144,#e9002b);
+  color:white;
+  font-size:clamp(18px,2.5vw,27px);
+  font-weight:900;
+  box-shadow:0 7px 20px #ed153526,inset 0 1px 0 #ffffff35;
+  touch-action:manipulation;
 }
 
-.speed-head {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 5px;
-  font-size: clamp(12px, 2vh, 15px);
+.stop-button:active {
+  transform:scale(.97);
+  background:#c90025;
 }
 
-.speed-value {
-  font-size: clamp(18px, 3.2vh, 25px);
-  font-weight: 900;
-  color: #7bb9ff;
+.stop-square {
+  width:20px;
+  height:20px;
+  background:white;
+  border-radius:3px;
 }
 
-input[type="range"] {
-  width: 100%;
-  margin: 12px 0;
-  accent-color: var(--blue);
-  touch-action: pan-y;
+.divider {
+  width:1px;
+  height:75px;
+  background:#293448;
+}
+
+.speed-area {min-width:0;width:100%}
+
+.speed-heading {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  margin-bottom:12px;
+}
+
+.speed-title {
+  color:var(--muted);
+  font-size:15px;
+  font-weight:900;
+  letter-spacing:.6px;
+}
+
+.speed-number {
+  color:var(--blue-light);
+  font-size:clamp(25px,3.2vw,36px);
+  font-weight:900;
+  font-variant-numeric:tabular-nums;
+}
+
+.slider-wrap {padding:6px 0 10px}
+
+#speedSlider {
+  display:block;
+  width:100%;
+  height:12px;
+  margin:0;
+  border-radius:20px;
+  outline:none;
+  background:#253248;
+  appearance:none;
+  -webkit-appearance:none;
+  cursor:pointer;
+  touch-action:pan-y;
+}
+
+#speedSlider::-webkit-slider-thumb {
+  appearance:none;
+  -webkit-appearance:none;
+  width:30px;
+  height:30px;
+  border-radius:50%;
+  background:var(--blue);
+  border:2px solid #4095ff;
+  box-shadow:0 0 16px #1678ff55;
+}
+
+#speedSlider::-moz-range-thumb {
+  width:26px;
+  height:26px;
+  border-radius:50%;
+  background:var(--blue);
+  border:2px solid #4095ff;
 }
 
 .speed-labels {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  color: var(--muted);
-  font-size: 11px;
+  display:flex;
+  justify-content:space-between;
+  margin-top:12px;
+  color:#8594ab;
+  font-size:11px;
 }
 
 .presets {
-  width: 100%;
-  display: grid;
-  grid-template-columns: repeat(3,1fr);
-  gap: 6px;
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:8px;
+  margin-top:17px;
 }
 
 .preset {
-  min-height: 39px;
-  border: 1px solid #4b5264;
-  border-radius: 10px;
-  background: #292c39;
-  color: white;
-  font-weight: bold;
-  font-size: 11px;
-  touch-action: manipulation;
+  min-height:38px;
+  border:1px solid #344158;
+  border-radius:9px;
+  background:#1a2434;
+  color:#d8e3f5;
+  font-size:12px;
+  font-weight:900;
+  touch-action:manipulation;
 }
 
 .preset.selected {
-  background: var(--blue);
-  border-color: var(--blue);
+  background:#155ac0;
+  border-color:#3288ff;
+  color:white;
 }
 
-@media (orientation: portrait) {
-  .app { padding: 6px; }
-  main { gap: 6px; }
-  .panel { padding: 7px; }
-  .dpad { --pad-size: min(39vw,32vh,260px); }
-  .turn-row { flex-direction: column; }
-  .turn { min-height: 42px; }
-  .stop-button { min-height: 40px; }
+.preset:active {transform:scale(.97)}
+
+.footer {
+  padding:0 16px 16px;
+  text-align:center;
+  color:#65758d;
+  font-size:11px;
 }
 
-@media (max-height: 400px) and (orientation: landscape) {
-  .app { padding: 3px 10px; }
-  header { min-height: 27px; }
-  .panel { padding: 5px 9px; }
-  .dpad { --pad-size: min(42vh,34vw,220px); }
-  .turn { min-height: 42px; }
-  .stop-button { min-height: 37px; }
-  input[type="range"] { margin: 5px 0; }
-  .preset { min-height: 31px; }
+@media(max-width:650px) {
+  .app {padding:10px;align-items:flex-start}
+  .controller {border-radius:20px}
+  .topbar {min-height:80px;padding:15px 10px;gap:10px 20px}
+  .car-icon {font-size:26px}
+  .brand h1 {font-size:26px}
+  .connection {font-size:11px}
+  .controls {
+    padding:25px 12px 30px;
+    grid-template-columns:.8fr 1.2fr;
+    gap:10px;
+  }
+  .vertical-arrows {gap:18px}
+  .horizontal-arrows {gap:10px}
+  .arrow-up,.arrow-down {
+    width:clamp(72px,21vw,112px);
+    height:clamp(76px,22vw,115px);
+    font-size:clamp(47px,13vw,70px);
+  }
+  .arrow-left,.arrow-right {
+    width:clamp(75px,22vw,120px);
+    height:clamp(64px,18vw,100px);
+    font-size:clamp(44px,12vw,72px);
+  }
+  .bottom-bar {
+    padding:20px 15px;
+    grid-template-columns:1fr;
+    gap:18px;
+  }
+  .stop-button {min-height:58px;max-width:none}
+  .divider {width:100%;height:1px}
+  .speed-heading {margin-bottom:8px}
+  .speed-area {padding:0 3px}
+  .footer {padding-bottom:14px}
+}
+
+@media(max-width:360px) {
+  .app {padding:5px}
+  .controls {padding:20px 5px 25px;gap:5px}
+  .arrow-up,.arrow-down {
+    width:70px;height:74px;font-size:46px;
+  }
+  .arrow-left,.arrow-right {
+    width:72px;height:60px;font-size:42px;
+  }
+  .horizontal-arrows {gap:7px}
+  .topbar {gap:8px}
+  .brand h1 {font-size:23px}
+}
+
+@media(orientation:landscape) and (max-height:500px) {
+  .app {padding:8px}
+  .topbar {min-height:58px;padding:8px}
+  .brand h1 {font-size:23px}
+  .car-icon {font-size:24px}
+  .controls {padding:12px 25px 18px}
+  .vertical-arrows {gap:10px}
+  .arrow-up,.arrow-down {
+    width:min(18vh,100px);
+    height:min(18vh,100px);
+    font-size:min(12vh,65px);
+  }
+  .arrow-left,.arrow-right {
+    width:min(25vw,180px);
+    height:min(16vh,85px);
+    font-size:min(12vh,60px);
+  }
+  .bottom-bar {padding:12px 25px}
+  .stop-button {min-height:52px}
+  .divider {height:55px}
+  .presets {margin-top:8px}
+  .preset {min-height:30px}
+  .footer {display:none}
 }
 </style>
 </head>
 
 <body>
 <div class="app">
-<header>
-  <h1>🏎️ RoboRacer</h1>
-  <div class="status" id="status">● Ready</div>
-</header>
+  <div class="controller">
 
-<main>
-<section class="panel">
-  <div class="label">DIRECTION PAD</div>
+    <header class="topbar">
+      <div class="brand">
+        <div class="car-icon">🏎️</div>
+        <h1>Robo<span>Racer</span></h1>
+      </div>
 
-  <div class="dpad">
-    <button class="arrow-up" data-c="F"
-      aria-label="Forward">▲</button>
-    <button class="arrow-down" data-c="B"
-      aria-label="Backward">▼</button>
-    <button class="arrow-left" data-c="L"
-      aria-label="Left">◀</button>
-    <button class="arrow-right" data-c="R"
-      aria-label="Right">▶</button>
-    <button class="center-stop" id="centerStop"
-      aria-label="Stop"></button>
+      <div class="connection" id="connection">
+        <span class="connection-dot"></span>
+        <span id="statusText">READY</span>
+      </div>
+    </header>
+
+    <main class="controls">
+      <div class="vertical-arrows">
+        <button class="arrow arrow-up"
+          data-c="F" aria-label="Forward">↑</button>
+        <button class="arrow arrow-down"
+          data-c="B" aria-label="Backward">↓</button>
+      </div>
+
+      <div class="horizontal-arrows">
+        <button class="arrow arrow-left"
+          data-c="L" aria-label="Left">←</button>
+        <button class="arrow arrow-right"
+          data-c="R" aria-label="Right">→</button>
+      </div>
+    </main>
+
+    <section class="bottom-bar">
+      <button class="stop-button" id="stopButton">
+        <span class="stop-square"></span>
+        STOP
+      </button>
+
+      <div class="divider"></div>
+
+      <div class="speed-area">
+        <div class="speed-heading">
+          <span class="speed-title">SPEED</span>
+          <span class="speed-number" id="speedValue">170</span>
+        </div>
+
+        <div class="slider-wrap">
+          <input id="speedSlider" type="range"
+            min="0" max="255" value="170"
+            aria-label="Motor speed">
+        </div>
+
+        <div class="speed-labels">
+          <span>SLOW</span>
+          <span>MEDIUM</span>
+          <span>FAST</span>
+        </div>
+
+        <div class="presets">
+          <button class="preset" data-speed="100">LOW</button>
+          <button class="preset selected" data-speed="170">MED</button>
+          <button class="preset" data-speed="255">MAX</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer">
+      Hold a direction to drive · Release to stop
+    </div>
+
   </div>
-
-  <div class="hint">Hold an arrow to move. Center = STOP.</div>
-</section>
-
-<section class="panel">
-  <div class="label">STEERING</div>
-
-  <div class="turn-row">
-    <button class="turn" data-c="L">◀ LEFT</button>
-    <button class="turn" data-c="R">RIGHT ▶</button>
-  </div>
-
-  <div class="hint">Hold a direction to move. Release it to stop.</div>
-  <button class="stop-button" id="stopButton">■ STOP</button>
-
-  <div class="speed-head">
-    <strong>Motor speed</strong>
-    <span class="speed-value" id="speedValue">170</span>
-  </div>
-
-  <input id="speedSlider" type="range"
-    min="0" max="255" value="170"
-    aria-label="Motor speed">
-
-  <div class="speed-labels">
-    <span>Slow</span><span>Medium</span><span>Fast</span>
-  </div>
-
-  <div class="presets">
-    <button class="preset" data-speed="100">LOW</button>
-    <button class="preset selected" data-speed="170">MED</button>
-    <button class="preset" data-speed="255">MAX</button>
-  </div>
-</section>
-</main>
 </div>
 
 <script>
+'use strict';
+
+const connection = document.getElementById('connection');
+const statusText = document.getElementById('statusText');
+const slider = document.getElementById('speedSlider');
+const speedValue = document.getElementById('speedValue');
+
 let held = null;
 let pointerId = null;
 let heartbeat = null;
 let speedTimer = null;
 let speed = 170;
-let requestQueue = Promise.resolve();
 let stopped = true;
+let requestChain = Promise.resolve();
+let commandGeneration = 0;
+let stopGeneration = 0;
 
-// Serialize requests so speed and direction updates do not
-// overtake one another.
-function request(path) {
-  const task = requestQueue.then(() =>
-    fetch(path, {
+function setStatus(state, text) {
+  connection.classList.remove('online', 'error');
+
+  if (state === 'online') connection.classList.add('online');
+  if (state === 'error') connection.classList.add('error');
+
+  statusText.textContent = text;
+}
+
+// Keep requests ordered so STOP follows older movement requests.
+function enqueueRequest(path) {
+  const task = requestChain.then(async () => {
+    const response = await fetch(path, {
       method: 'GET',
       cache: 'no-store'
-    })
-  );
+    });
 
-  requestQueue = task.catch(() => {});
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+
+    return response;
+  });
+
+  requestChain = task.catch(() => {});
   return task;
 }
 
-function setStatus(message) {
-  document.getElementById('status').textContent = message;
-}
+function sendCommand(command) {
+  const generation = commandGeneration;
+  const thisStopGeneration = stopGeneration;
 
-function sendCommand(c) {
-  request('/cmd?c=' + c)
-    .then(response => {
-      if (!response.ok) throw new Error('Command failed');
-      setStatus('● Connected');
+  enqueueRequest('/cmd?c=' + command)
+    .then(() => {
+      if (generation === commandGeneration &&
+          thisStopGeneration === stopGeneration) {
+        setStatus('online', 'CONNECTED');
+      }
     })
-    .catch(() => setStatus('● Connection error'));
+    .catch(() => {
+      if (generation === commandGeneration &&
+          thisStopGeneration === stopGeneration) {
+        setStatus('error', 'CONNECTION ERROR');
+      }
+    });
 }
 
 function sendSpeed(value) {
-  request('/speed?v=' + value)
-    .then(response => {
-      if (!response.ok) throw new Error('Speed failed');
-      setStatus('● Connected');
+  const generation = commandGeneration;
+
+  enqueueRequest('/speed?v=' + value)
+    .then(() => {
+      if (generation === commandGeneration) {
+        setStatus('online', 'CONNECTED');
+      }
     })
-    .catch(() => setStatus('● Speed update failed'));
+    .catch(() => {
+      if (generation === commandGeneration) {
+        setStatus('error', 'SPEED ERROR');
+      }
+    });
 }
 
 function startHeartbeat() {
   stopHeartbeat();
 
   heartbeat = setInterval(() => {
-    if (held !== null) sendCommand(held);
+    if (held !== null && !stopped) {
+      sendCommand(held);
+    }
   }, 300);
 }
 
 function stopHeartbeat() {
-  if (heartbeat !== null) clearInterval(heartbeat);
-  heartbeat = null;
+  if (heartbeat !== null) {
+    clearInterval(heartbeat);
+    heartbeat = null;
+  }
 }
 
-function clearActive() {
+function clearArrowHighlights() {
   document.querySelectorAll('[data-c]').forEach(button => {
     button.classList.remove('active');
   });
 }
 
-function releasePointer(event) {
-  // Ignore stale events belonging to a previous pointer.
-  if (pointerId === null || event.pointerId !== pointerId) return;
-
-  const commandWasHeld = held !== null;
+function stopAll() {
+  // Invalidate previous status callbacks and stop heartbeats.
+  commandGeneration++;
+  stopGeneration++;
 
   held = null;
   pointerId = null;
   stopped = true;
-  stopHeartbeat();
-  clearActive();
 
-  if (commandWasHeld) sendCommand('S');
+  stopHeartbeat();
+  clearArrowHighlights();
+
+  // Send STOP after any earlier queued requests.
+  sendCommand('S');
 }
 
 document.querySelectorAll('[data-c]').forEach(button => {
@@ -609,6 +786,8 @@ document.querySelectorAll('[data-c]').forEach(button => {
     event.preventDefault();
 
     if (held !== null) return;
+
+    commandGeneration++;
 
     held = button.dataset.c;
     pointerId = event.pointerId;
@@ -618,46 +797,49 @@ document.querySelectorAll('[data-c]').forEach(button => {
 
     try {
       button.setPointerCapture(event.pointerId);
-    } catch (error) {}
+    } catch (error) {
+      // Window release handlers are also installed.
+    }
 
     sendCommand(held);
     startHeartbeat();
   });
 
-  button.addEventListener('pointerup', releasePointer);
-  button.addEventListener('pointercancel', releasePointer);
-  button.addEventListener('lostpointercapture', releasePointer);
+  button.addEventListener('pointerup', event => {
+    if (event.pointerId !== pointerId) return;
+    stopAll();
+  });
+
+  button.addEventListener('pointercancel', event => {
+    if (event.pointerId !== pointerId) return;
+    stopAll();
+  });
+
+  button.addEventListener('lostpointercapture', event => {
+    if (event.pointerId !== pointerId) return;
+    stopAll();
+  });
 });
 
-function stopAll() {
-  const shouldSendStop = !stopped;
-
-  held = null;
-  pointerId = null;
-  stopped = true;
-
-  stopHeartbeat();
-  clearActive();
-
-  // Always send STOP, even if the browser thinks it is stopped.
-  sendCommand('S');
-}
-
-document.getElementById('centerStop').addEventListener(
-  'pointerdown', event => {
-    event.preventDefault();
+window.addEventListener('pointerup', event => {
+  if (pointerId !== null && event.pointerId === pointerId) {
     stopAll();
   }
-);
+});
+
+window.addEventListener('pointercancel', event => {
+  if (pointerId !== null && event.pointerId === pointerId) {
+    stopAll();
+  }
+});
 
 document.getElementById('stopButton').addEventListener(
   'click', stopAll
 );
 
 function updateSpeed(value) {
-  speed = Number(value);
-
-  document.getElementById('speedValue').textContent = speed;
+  speed = Math.max(0, Math.min(255, Number(value)));
+  speedValue.textContent = speed;
 
   document.querySelectorAll('[data-speed]').forEach(button => {
     button.classList.toggle(
@@ -671,21 +853,21 @@ function updateSpeed(value) {
   speedTimer = setTimeout(() => {
     sendSpeed(speed);
     speedTimer = null;
-  }, 50);
+  }, 60);
 }
 
-document.getElementById('speedSlider').addEventListener(
-  'input', event => updateSpeed(event.target.value)
-);
+slider.addEventListener('input', event => {
+  updateSpeed(event.target.value);
+});
 
 document.querySelectorAll('[data-speed]').forEach(button => {
   button.addEventListener('click', () => {
-    document.getElementById('speedSlider').value =
-      button.dataset.speed;
+    slider.value = button.dataset.speed;
     updateSpeed(button.dataset.speed);
   });
 });
 
+// Stop if the browser tab loses focus.
 window.addEventListener('blur', stopAll);
 
 document.addEventListener('visibilitychange', () => {
@@ -693,18 +875,22 @@ document.addEventListener('visibilitychange', () => {
 });
 
 window.addEventListener('pagehide', stopAll);
+
+// Do not claim a connection until a request succeeds.
+setStatus('', 'READY');
 </script>
 </body>
 </html>
 )rawliteral";
 
-// ===== SETUP =====
+// ---------------- SETUP ---------------------------
 void setup() {
   Serial.begin(115200);
 
   pinMode(ENA, OUTPUT);
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
+
   pinMode(ENB, OUTPUT);
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
@@ -712,6 +898,7 @@ void setup() {
   analogWriteRange(255);
   analogWriteFreq(1000);
 
+  currentCommand = 'S';
   stopMotors();
 
   WiFi.persistent(false);
@@ -725,7 +912,8 @@ void setup() {
     Serial.println("RoboRacer Wi-Fi started");
     Serial.print("Network: ");
     Serial.println(ssid);
-    Serial.print("Open: http://");
+
+    Serial.print("Open browser at: http://");
     Serial.println(WiFi.softAPIP());
   } else {
     Serial.println("Wi-Fi startup failed!");
@@ -744,16 +932,16 @@ void setup() {
 
   server.begin();
 
-  lastComm  andTime = millis();
+  lastCommandTime = millis();
 
-  Serial.println("Web server ready");
+  Serial.println("RoboRacer web server ready");
 }
 
-// ===== MAIN LOOP =====
+// ---------------- MAIN LOOP ------------------------
 void loop() {
   server.handleClient();
 
-  // Stop if direction heartbeats stop, regardless of PWM state.
+  // Safety stop if movement heartbeats disappear.
   if (currentCommand != 'S' &&
       millis() - lastCommandTime >= TIMEOUT_MS) {
     currentCommand = 'S';
