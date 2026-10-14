@@ -921,6 +921,7 @@ void setup() {
 
   server.on("/", HTTP_GET, []() {
     server.send_P(200, "text/html", webpage);
+    
   });
 
   server.on("/cmd", HTTP_GET, handleCommand);
