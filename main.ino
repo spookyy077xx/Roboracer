@@ -2,20 +2,6 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 
-// ==================================================
-// ROBO RACER - ESP8266 NODEMCU / ESP-12E + L298N
-// ==================================================
-// ENA -> D7 (GPIO13)
-// IN1 -> D1 (GPIO5)
-// IN2 -> D2 (GPIO4)
-// ENB -> D8 (GPIO15) - remove ENB jumper
-// IN3 -> D5 (GPIO14)
-// IN4 -> D6 (GPIO12)
-//
-// L298N GND and ESP8266 GND must be connected.
-// Use a suitable external supply for the motors.
-
-// ---------------- MOTOR PINS -----------------------
 #define ENA 13
 #define IN1 5
 #define IN2 4
@@ -37,7 +23,7 @@ char currentCommand = 'S';
 bool moving = false;
 
 unsigned long lastCommandTime = 0;
-const unsigned long TIMEOUT_MS = 1200;
+const unsigned long TIMEOUT_MS = 600;
 
 // ---------------- STOP MOTORS ----------------------
 void stopMotors() {
@@ -54,11 +40,11 @@ void stopMotors() {
 
 // ---------------- SET MOTOR SPEED/DIRECTION --------
 void setMotors(int left, int right) {
-  left = constrain(left, -255, 255);
-  right = constrain(right, -255, 255);
+  left = constrain(left, -180, 180);
+  right = constrain(right, -180, 180);
 
   // Disable PWM before changing direction.
-  analogWrite(ENA, 0);
+  analogWrite(ENA, 0);                                                                       
   analogWrite(ENB, 0);
 
   digitalWrite(IN1, left > 0 ? HIGH : LOW);
@@ -80,7 +66,7 @@ void applyCommand() {
     return;
   }
 
-  int s = constrain(motorSpeed, 0, 255);
+  int s = constrain(motorSpeed, 0, 180);
 
   switch (currentCommand) {
     case 'F':
