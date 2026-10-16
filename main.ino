@@ -9,11 +9,11 @@
 #define ENB 15
 #define IN3 14
 #define IN4 12
+dios@121321##@@";
 
 // ---------------- WIFI ACCESS POINT ----------------
 const char* ssid = "OLL_RoboRacer";
-const char* password = "robostudios@121321##@@";
-
+const char* password = "robostu
 ESP8266WebServer server(80);
 
 // ---------------- MOTOR STATE ----------------------
@@ -872,6 +872,7 @@ setStatus('', 'READY');
 // ---------------- SETUP ---------------------------
 void setup() {
   Serial.begin(115200);
+  Serial.println("Communication monitor started");
 
   pinMode(ENA, OUTPUT);
   pinMode(IN1, OUTPUT);
